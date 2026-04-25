@@ -1,0 +1,12 @@
+# Models
+*.engine
+*.onnx
+*.pt
+
+# Build
+build/
+*.o
+*.a
+
+# Logs
+*.log
