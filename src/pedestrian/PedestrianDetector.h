@@ -5,7 +5,7 @@
 #include <vector>
 #include <opencv2/core.hpp>
 #include <NvInfer.h>
-
+#include <iostream>
 // ── Logger ────────────────────────────────────────────────────
 class Logger : public nvinfer1::ILogger {
 public:
