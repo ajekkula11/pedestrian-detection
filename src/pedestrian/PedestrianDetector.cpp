@@ -16,12 +16,12 @@ static constexpr int   INPUT_W       = 640;
 static constexpr int   INPUT_H       = 640;
 static constexpr int   NUM_CLASSES   = 80;
 static constexpr int   NUM_BOXES     = 8400;
-static constexpr float CONF_THRESH   = 0.18f;
-static constexpr float NMS_THRESH    = 0.40f;
+static constexpr float CONF_THRESH   = 0.22f;
+static constexpr float NMS_THRESH    = 0.35f;
 static constexpr int   PERSON_CLS_ID = 0;
 
 static constexpr float IOU_THRESH  = 0.15f;
-static constexpr int   MAX_MISSING = 5;
+static constexpr int   MAX_MISSING = 10;
 static constexpr float EMA_ALPHA   = 0.4f;
 
 // ─────────────────────────────────────────────────────────────
@@ -296,24 +296,23 @@ void PedestrianDetector::updateTracks(const std::vector<Detection>& detections) 
 }
 
 // ─────────────────────────────────────────────────────────────
-// computeRisk (Phase 4)
+// computeRisk (Phase 4) — Zone-based
+// Trapezoid split at 70% frame height:
+//   Outside ROI                  -> LOW   (green)
+//   Inside ROI, above 70% line   -> MEDIUM (yellow)
+//   Inside ROI, below 70% line   -> HIGH  (red)
 // ─────────────────────────────────────────────────────────────
 RiskLevel PedestrianDetector::computeRisk(const Track& trk, bool inside_roi) {
-    if (frame_height_ <= 0) return RiskLevel::LOW;
+    if (!inside_roi) return RiskLevel::LOW;
 
-    float proximity   = static_cast<float>(trk.bbox.y + trk.bbox.height) / frame_height_;
-    float motion_mag  = static_cast<float>(cv::norm(trk.centroid - trk.prev_centroid)) / 10.0f;
-    float persistence = std::min(trk.frames_tracked / 30.0f, 1.0f);
-    float roi_weight  = inside_roi ? 1.0f : 0.2f;
+    // Centroid y position as fraction of frame height
+    float cy_norm = static_cast<float>(trk.bbox.y + trk.bbox.height) / static_cast<float>(frame_height_);
 
-    float risk = 0.25f * proximity
-               + 0.25f * motion_mag
-               + 0.25f * persistence
-               + 0.25f * roi_weight;
+    // Below the danger line (70% of frame height) = HIGH risk
+    if (cy_norm >= 0.70f) return RiskLevel::HIGH;
 
-    if (risk >= 0.65f)      return RiskLevel::HIGH;
-    else if (risk >= 0.35f) return RiskLevel::MEDIUM;
-    else                    return RiskLevel::LOW;
+    // Inside ROI but above danger line = MEDIUM risk
+    return RiskLevel::MEDIUM;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -341,7 +340,25 @@ std::vector<TrackedPedestrian> PedestrianDetector::detect(const cv::Mat& frame) 
         results.push_back(tp);
     }
 
-    return results;
+    // ── Post-tracking NMS: centroid-distance suppression ────────────────
+    // If two tracks have centroids within 80px, keep the older one
+    std::vector<TrackedPedestrian> filtered;
+    for (int i = 0; i < (int)results.size(); i++) {
+        bool suppressed = false;
+        for (int j = 0; j < (int)results.size(); j++) {
+            if (i == j) continue;
+            float dx   = results[i].centroid.x - results[j].centroid.x;
+            float dy   = results[i].centroid.y - results[j].centroid.y;
+            float dist = std::sqrt(dx*dx + dy*dy);
+            if (dist < 150.0f &&
+                results[j].frames_tracked > results[i].frames_tracked) {
+                suppressed = true;
+                break;
+            }
+        }
+        if (!suppressed) filtered.push_back(results[i]);
+    }
+    return filtered;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -353,23 +370,81 @@ std::vector<TrackedPedestrian> PedestrianDetector::detect(const cv::Mat& frame) 
 // ─────────────────────────────────────────────────────────────
 void PedestrianDetector::visualize(cv::Mat& frame,
                                    const std::vector<TrackedPedestrian>& peds) {
+    int W = frame.cols, H = frame.rows;
+
+    // ── Draw ROI trapezoid outline (cyan) ────────────────────────────────
     if (!roi_polygon.empty()) {
         std::vector<std::vector<cv::Point>> polys = {roi_polygon};
-        cv::polylines(frame, polys, /*isClosed=*/true, cv::Scalar(0, 255, 255), 2);
+        cv::polylines(frame, polys, true, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
     }
 
+    // ── Draw danger zone divider (dotted white line at 70% height) ───────
+    // Interpolate left and right edges of trapezoid at 70% frame height
+    // Trapezoid: TL(30%,45%) TR(70%,45%) BR(95%,95%) BL(5%,95%)
+    float t = (0.70f - 0.45f) / (0.95f - 0.45f);  // lerp factor along height
+    int div_lx = static_cast<int>((0.30f + t * (0.05f - 0.30f)) * W);
+    int div_rx = static_cast<int>((0.70f + t * (0.95f - 0.70f)) * W);
+    int div_y  = static_cast<int>(0.70f * H);
+
+    // Draw dotted line
+    int dash = 12, gap = 8;
+    for (int x = div_lx; x < div_rx; x += dash + gap) {
+        int x2 = std::min(x + dash, div_rx);
+        cv::line(frame, cv::Point(x, div_y), cv::Point(x2, div_y),
+                 cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+    }
+
+    // Zone labels
+    cv::putText(frame, "DANGER",
+                cv::Point(div_lx + 8, div_y + 20),
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+    cv::putText(frame, "CAUTION",
+                cv::Point(div_lx + 8, div_y - 8),
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+
+    // ── Draw each tracked pedestrian ─────────────────────────────────────
     for (const auto& tp : peds) {
-        cv::Scalar color = tp.inside_roi ? cv::Scalar(0, 200, 0)   // green
-                                         : cv::Scalar(200, 0, 0);  // blue (BGR)
+        cv::Rect box = tp.detection.bbox;
 
-        cv::rectangle(frame, tp.detection.bbox, color, 2);
+        // Color by risk zone
+        cv::Scalar box_color;
+        std::string risk_str;
+        if (tp.risk == RiskLevel::HIGH) {
+            box_color = cv::Scalar(0, 0, 255);    // red
+            risk_str  = "HIGH";
+        } else if (tp.risk == RiskLevel::MEDIUM) {
+            box_color = cv::Scalar(0, 200, 255);  // yellow
+            risk_str  = "MED";
+        } else {
+            box_color = cv::Scalar(0, 255, 0);    // green
+            risk_str  = "LOW";
+        }
 
+        // Smooth box using EMA centroid
+        int cx = static_cast<int>(tp.centroid.x);
+        int cy = static_cast<int>(tp.centroid.y);
+        int hw = box.width  / 2;
+        int hh = box.height / 2;
+        cv::Rect smooth_box(cx - hw, cy - hh, box.width, box.height);
+        smooth_box &= cv::Rect(0, 0, W, H);  // clamp to frame
+
+        cv::rectangle(frame, smooth_box, box_color, 2, cv::LINE_AA);
+
+        // Label background + text
         std::string label = "ID:" + std::to_string(tp.track_id)
-                          + " f:"  + std::to_string(tp.frames_tracked);
-
+                          + " " + risk_str
+                          + " f:" + std::to_string(tp.frames_tracked);
+        int baseline = 0;
+        cv::Size ts = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.42, 1, &baseline);
+        int lx = smooth_box.x;
+        int ly = std::max(smooth_box.y - ts.height - 6, 0);
+        cv::rectangle(frame,
+                      cv::Point(lx, ly),
+                      cv::Point(lx + ts.width, ly + ts.height + 4),
+                      box_color, cv::FILLED);
         cv::putText(frame, label,
-                    cv::Point(tp.detection.bbox.x,
-                              std::max(tp.detection.bbox.y - 5, 12)),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_AA);
+                    cv::Point(lx, ly + ts.height),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                    cv::Scalar(0, 0, 0), 1, cv::LINE_AA);
     }
 }
