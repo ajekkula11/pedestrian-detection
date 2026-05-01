@@ -29,5 +29,5 @@ target_link_libraries(pedestrian_test
     cudart
 )
 
-# 🔥 REAL FIX
+
 target_link_options(pedestrian_test PRIVATE -Wl,--unresolved-symbols=ignore-in-shared-libs)

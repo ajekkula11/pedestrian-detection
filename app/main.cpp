@@ -43,7 +43,6 @@ int main(int argc, char** argv) {
         total_ms += ms;
         frame_count++;
 
-        // ── HUD ──────────────────────────────────────────────────────────
         int n_high = 0, n_med = 0, n_low = 0;
         for (const auto& p : peds) {
             if      (p.risk == RiskLevel::HIGH)   n_high++;

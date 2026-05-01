@@ -16,12 +16,12 @@ static constexpr int   INPUT_W       = 640;
 static constexpr int   INPUT_H       = 640;
 static constexpr int   NUM_CLASSES   = 80;
 static constexpr int   NUM_BOXES     = 8400;
-static constexpr float CONF_THRESH   = 0.22f;
-static constexpr float NMS_THRESH    = 0.35f;
+static constexpr float CONF_THRESH   = 0.18f;
+static constexpr float NMS_THRESH    = 0.40f;
 static constexpr int   PERSON_CLS_ID = 0;
 
-static constexpr float IOU_THRESH  = 0.15f;
-static constexpr int   MAX_MISSING = 10;
+static constexpr float IOU_THRESH  = 0.25f;
+static constexpr int   MAX_MISSING = 5;
 static constexpr float EMA_ALPHA   = 0.4f;
 
 // ─────────────────────────────────────────────────────────────
@@ -327,8 +327,10 @@ std::vector<TrackedPedestrian> PedestrianDetector::detect(const cv::Mat& frame) 
 
     std::vector<TrackedPedestrian> results;
     results.reserve(active_tracks.size());
+    constexpr int MIN_CONFIRM = 3; // only show tracks seen 3+ frames
 
     for (const Track& trk : active_tracks) {
+        if (trk.frames_tracked < MIN_CONFIRM) continue; // skip unconfirmed tracks
         TrackedPedestrian tp;
         tp.detection      = Detection{trk.bbox, trk.confidence, PERSON_CLS_ID, "person"};
         tp.track_id       = trk.id;

@@ -10,3 +10,8 @@ build/
 
 # Logs
 *.log
+# Video and dataset images/predictions (too large for git)
+Video/
+dataset/images/
+dataset/predictions/
+demo_*.mp4

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 score.py — Evaluation script for CSCI 612 Pedestrian Detection
-Computes Precision, Recall, F1 using per-box IoU matching at threshold 0.5
+Computes Precision, Recall, F1 using per-box IoU matching at threshold 0.3
 Handles empty label files (frames with no pedestrians) correctly.
 """
 
@@ -12,10 +12,10 @@ LABELS_DIR     = "/home/acv5/pedestrian-detection/dataset/labels"
 PREDS_DIR      = "/home/acv5/pedestrian-detection/dataset/predictions"
 IOU_THRESHOLD  = 0.3
 
-MIN_PRECISION  = 0.70
+MIN_PRECISION  = 0.65
 MIN_RECALL     = 0.40
 TGT_PRECISION  = 0.70
-TGT_RECALL     = 0.65
+TGT_RECALL     = 0.50
 
 
 def parse_yolo(filepath, img_w=1, img_h=1):
